@@ -1,17 +1,22 @@
-name: Fly Deploy
+name: Deploy Backend to Fly.io
+
 on:
   push:
     branches: [main]
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Deploy to Fly
-        # 修正点：去掉了之前错误的 --working-dir 参数
-        run: flyctl deploy --remote-only
-        # 修正点：这才是 GitHub Actions 切换文件夹的正确姿势
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Fly deploy (backend/)
         working-directory: ./backend
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy --remote-only
