@@ -8,6 +8,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --remote-only --working-dir backend
+      - name: Deploy to Fly
+        # 修正点：去掉了之前错误的 --working-dir 参数
+        run: flyctl deploy --remote-only
+        # 修正点：这才是 GitHub Actions 切换文件夹的正确姿势
+        working-directory: ./backend
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
