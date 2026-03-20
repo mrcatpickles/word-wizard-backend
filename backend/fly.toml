@@ -1,20 +1,17 @@
-# fly.toml app configuration file generated for backend-black-snow-4374 on 2026-03-19T22:29:27+08:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
-app = 'backend-black-snow-4374'
+# 必须改回这个名字，否则部署不到正确的地址
+app = 'word-wizard-backend'
 primary_region = 'nrt'
 
 [build]
 
 [http_service]
-  internal_port = 8000
+  # 必须是 8080，确保和 main.py 里的 port = int(os.environ.get("PORT", 8080)) 一致
+  internal_port = 8080
   force_https = true
   auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 0
-  processes = ['app']
+  # 强制保持 1 台机器运行，防止因为自动停止导致的“意外终止连接”
+  min_machines_running = 1
 
 [[vm]]
   memory = '1gb'
