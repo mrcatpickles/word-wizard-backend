@@ -1,19 +1,20 @@
-# 必须改回这个名字，否则部署不到正确的地址
 app = 'word-wizard-backend'
 primary_region = 'nrt'
 
 [build]
 
 [http_service]
-  # 必须是 8080，确保和 main.py 里的 port = int(os.environ.get("PORT", 8080)) 一致
   internal_port = 8080
   force_https = true
   auto_stop_machines = 'stop'
   auto_start_machines = true
-  # 强制保持 1 台机器运行，防止因为自动停止导致的“意外终止连接”
   min_machines_running = 1
 
 [[vm]]
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
+
+# --- 关键：增加下面这两行，强制指定启动路径 ---
+[processes]
+  app = "uvicorn backend.main:app --host 0.0.0.0 --port 8080"
