@@ -1,0 +1,29 @@
+# =============================================================================
+# Word Wizard：让后端访问 OpenRouter / Replicate 走「美国或任意可用代理」
+# =============================================================================
+# 用法（任选一种）：
+#
+# 【方式 A】编辑你的 Clash 主配置，找到 rules: 段，把下面 3 行粘到 rules 的【最上面】
+#          （必须在 GEOIP CN,DIRECT 或 MATCH 之前）
+#
+# 【方式 B】Clash Verge / Meta：配置 → 覆写/合并 → prepend-rules 里粘贴下面 3 行
+#
+# ⚠️ 把下面所有的「WordWizard-Proxy」改成你客户端里真实的策略组名，例如：
+#    🚀 节点选择、🔰 代理、PROXY、美国、Auto 等（选「美国节点」或「全局代理」那一组）
+# =============================================================================
+
+prepend-rules:
+  - DOMAIN-SUFFIX,openrouter.ai,WordWizard-Proxy
+  - DOMAIN-SUFFIX,replicate.com,WordWizard-Proxy
+  - DOMAIN-KEYWORD,openrouter,WordWizard-Proxy
+
+# =============================================================================
+# 若你的 Clash 不支持 prepend-rules，只复制下面 3 行到主配置 rules: 顶部：
+#
+#   - DOMAIN-SUFFIX,openrouter.ai,WordWizard-Proxy
+#   - DOMAIN-SUFFIX,replicate.com,WordWizard-Proxy
+#   - DOMAIN-KEYWORD,openrouter,WordWizard-Proxy
+#
+# 改完：重载配置 → 开「允许局域网」→ 重启本项目的 backend
+# 自检：浏览器打开 http://127.0.0.1:8002/api/debug_outbound_ip
+# =============================================================================

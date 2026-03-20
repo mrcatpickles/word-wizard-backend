@@ -1,0 +1,49 @@
+{
+  "hash": "dcf89852",
+  "configHash": "27efde0d",
+  "lockfileHash": "a05c6580",
+  "browserHash": "75b9b970",
+  "optimized": {
+    "react/jsx-dev-runtime": {
+      "src": "../../node_modules/react/jsx-dev-runtime.js",
+      "file": "react_jsx-dev-runtime.js",
+      "fileHash": "d62c6517",
+      "needsInterop": true
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "667c2d48",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "dab155d4",
+      "needsInterop": true
+    },
+    "html2canvas": {
+      "src": "../../node_modules/html2canvas/dist/html2canvas.esm.js",
+      "file": "html2canvas.js",
+      "fileHash": "a2246496",
+      "needsInterop": false
+    },
+    "react-dom": {
+      "src": "../../node_modules/react-dom/index.js",
+      "file": "react-dom.js",
+      "fileHash": "9c461f31",
+      "needsInterop": true
+    }
+  },
+  "chunks": {
+    "chunk-AEWNCE5P": {
+      "file": "chunk-AEWNCE5P.js"
+    },
+    "chunk-JE4RKZ3F": {
+      "file": "chunk-JE4RKZ3F.js"
+    },
+    "chunk-BUSYA2B4": {
+      "file": "chunk-BUSYA2B4.js"
+    }
+  }
+}

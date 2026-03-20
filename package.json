@@ -1,0 +1,15 @@
+{
+  "name": "word-wizard-adults-ai",
+  "private": true,
+  "scripts": {
+    "dev": "bash start-dev.sh",
+    "run_dev": "bash run_dev.sh",
+    "stop:api": "bash stop-backend.sh",
+    "dev:together": "concurrently -k -n api,web -c blue,magenta \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "cd backend && python -m uvicorn main:app --reload --host 127.0.0.1 --port 8002",
+    "dev:web": "cd frontend && npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

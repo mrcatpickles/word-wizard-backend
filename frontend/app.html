@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Wizard Adult MVP</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #e0e0e0;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 { text-align: center; color: #b39ddb; }
+        .card {
+            background-color: #1e1e1e;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+        }
+        .info-bar {
+            display: flex;
+            justify-content: flex-start;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+            font-size: 0.9em;
+            color: #888;
+        }
+        .word-tag {
+            display: inline-block; background-color: #311b92; color: #fff;
+            padding: 5px 12px; border-radius: 20px; margin: 0 5px 10px 0; font-weight: bold;
+        }
+        textarea {
+            width: 100%; height: 80px; background-color: #2c2c2c; color: #fff;
+            border: 1px solid #444; border-radius: 8px; padding: 10px; box-sizing: border-box;
+            font-size: 16px; margin-bottom: 10px;
+        }
+        button {
+            width: 100%; padding: 12px; background-color: #673ab7; color: white;
+            border: none; border-radius: 8px; font-size: 16px; cursor: pointer; transition: background 0.3s;
+        }
+        button:hover { background-color: #5e35b1; }
+        button:disabled { background-color: #555; cursor: not-allowed; }
+        #feedback { margin-top: 10px; font-size: 0.9em; color: #ffb74d; }
+        .image-preview { width: 100%; border-radius: 8px; display: none; }
+        #loading { display: none; text-align: center; color: #b39ddb; margin-top: 10px; }
+        .history-item { border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 10px; }
+        .scene-area { display: none; margin-top: 15px; gap: 14px; align-items: flex-start; }
+        .image-col { flex: 1; min-width: 0; }
+        .img-wrap { position: relative; }
+        .sentence-overlay {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 10px 12px;
+            background: rgba(0,0,0,0.55);
+            color: #fff;
+            font-size: 14px;
+            line-height: 1.4;
+            border-radius: 0 0 8px 8px;
+        }
+        .actions-col { width: 170px; display: flex; flex-direction: column; gap: 10px; }
+        .actions-col button { width: 100%; padding: 10px 12px; }
+        .secondary { background-color: #3b82f6; }
+        .secondary:hover { background-color: #2563eb; }
+        .success { background-color: #10b981; }
+        .success:hover { background-color: #059669; }
+
+        .story-images { display: grid; grid-template-columns: 1fr; gap: 12px; }
+        .story-images .img-wrap { border-radius: 8px; overflow: hidden; }
+        .storyline-box {
+            margin-top: 10px;
+            padding: 12px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+            font-size: 13px;
+            line-height: 1.5;
+            color: #d1d5db;
+        }
+        .character-picker {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin: 10px 0 8px;
+        }
+        .profile-picker {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin: 8px 0 10px;
+        }
+        .char-card {
+            border: 1px solid #3b3b3b;
+            border-radius: 10px;
+            padding: 8px;
+            background: #232323;
+            cursor: pointer;
+            text-align: center;
+            transition: all .2s ease;
+        }
+        .char-card.active {
+            border-color: #8b5cf6;
+            box-shadow: 0 0 0 2px rgba(139,92,246,.25) inset;
+        }
+        .char-avatar {
+            width: 100%;
+            height: 180px;
+            border-radius: 10px;
+            margin: 0 auto 8px;
+            display: block;
+            object-fit: cover;
+            border: 2px solid rgba(255,255,255,.2);
+        }
+        .char-name { font-weight: 700; font-size: 14px; color: #f3f4f6; }
+        .char-look { font-size: 11px; color: #9ca3af; margin-top: 4px; line-height: 1.3; }
+        .economy-bar {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: rgba(99, 102, 241, 0.14);
+            border: 1px solid rgba(99, 102, 241, 0.4);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .economy-stats { font-size: 13px; color: #e5e7eb; }
+        .economy-bar button {
+            width: auto;
+            padding: 8px 14px;
+            border-radius: 999px;
+            background: #f59e0b;
+            color: #111827;
+            font-weight: 700;
+        }
+        .economy-note { font-size: 12px; color: #cbd5e1; margin-top: 6px; }
+    </style>
+</head>
+<body>
+    <h1>Word Wizard</h1>
+    <p id="app-version" style="text-align:center;color:#9ca3af;margin-top:-6px;margin-bottom:14px;font-size:12px;"></p>
+    
+    <div class="card" id="game-container">
+        <div class="info-bar">
+            <span>Scene: <b id="ui-scene">Dating</b> | Character: <b id="ui-char">Adrien</b></span>
+            <span id="round-counter">Round 1 / 5</span>
+        </div>
+        <div class="economy-bar">
+            <div class="economy-stats">
+                💎 Diamonds: <b id="diamond-count">0</b> | 🎟️ Image Tickets: <b id="ticket-count">0</b>
+            </div>
+            <button id="redeem-btn" type="button">Redeem 50💎 for 5 Tickets</button>
+        </div>
+        <div class="economy-note">Rules: +5💎 per passed sentence, +10💎 per completed storybook, 50💎 = 5 image tickets.</div>
+
+        <div>
+            <p>Target Words:</p>
+            <div id="word-container">Loading words...</div>
+        </div>
+
+        <div>
+            <p style="margin:10px 0 4px;">Character:</p>
+            <div id="character-picker" class="character-picker"></div>
+        </div>
+        <div>
+            <p style="margin:10px 0 4px;">Female Lead:</p>
+            <div id="profile-picker" class="profile-picker"></div>
+        </div>
+
+        <div class="info-bar" style="margin-top:10px;">
+            <span>
+                画面风格:
+                <select id="portrait-style-select" style="margin-left:8px;padding:6px;border-radius:8px;background:#2c2c2c;color:#fff;border:1px solid #444;">
+                    <option value="cinematic">电影质感</option>
+                    <option value="comic">美式漫画</option>
+                </select>
+            </span>
+            <span>
+                Mode:
+                <select id="mode-select" style="margin-left:8px;padding:6px;border-radius:8px;background:#2c2c2c;color:#fff;border:1px solid #444;">
+                    <option value="romance">Romance</option>
+                    <option value="adventure">Adventure</option>
+                </select>
+            </span>
+            <span>
+                Story style:
+                <select id="style-select" style="margin-left:8px;padding:6px;border-radius:8px;background:#2c2c2c;color:#fff;border:1px solid #444;">
+                    <option value="mature_romantic">Mature romantic</option>
+                    <option value="young_cute">Young cute</option>
+                </select>
+            </span>
+            <span>
+                Words:
+                <select id="wordcount-select" style="margin-left:8px;padding:6px;border-radius:8px;background:#2c2c2c;color:#fff;border:1px solid #444;">
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                </select>
+            </span>
+        </div>
+        <div id="storyline-box" class="storyline-box">Loading route...</div>
+
+        <textarea id="sentence-input" placeholder="Craft your sentence here..."></textarea>
+        
+        <button id="submit-btn" onclick="submitSentence()">Submit & Generate Scene</button>
+        <div id="loading">✨ AI is thinking and painting... please wait ✨</div>
+        <div id="feedback"></div>
+        
+        <div id="scene-area" class="scene-area">
+            <div class="image-col">
+                <div class="img-wrap">
+                    <img id="scene-image" class="image-preview" src="" alt="Scene Preview">
+                    <div id="sentence-overlay" class="sentence-overlay"></div>
+                </div>
+            </div>
+            <div id="image-actions" class="actions-col">
+                <button id="save-btn" class="success">Save Image</button>
+                <button id="next-btn" class="secondary">Next Sentence</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card" id="story-container" style="display: none;">
+        <h2 style="color: #ce93d8;">Your Final Story</h2>
+        <img id="cover-image" class="image-preview" src="" style="display: block; margin-bottom: 15px;">
+        <div id="story-images" class="story-images"></div>
+        <p id="final-story-text" style="line-height: 1.6;"></p>
+    </div>
+
+    <script>
+        const API_BASE = "http://127.0.0.1:8000/api";
+        const APP_VERSION = "html-v3-2026-03-02-roles-style-switch-04-hd-remap";
+        const AVATAR_BASE = "./public/split_faces";
+        const AVATAR_Q = "?v=20260302-04";
+        const ECONOMY_STORAGE_KEY = "wordWizardEconomyV1";
+        let currentRound = 1;
+        const MAX_ROUNDS = 5;
+        const scene = "dating";
+        const CHARACTER_OPTIONS_BY_STYLE = {
+            cinematic: [
+            {
+                name: "Adrien",
+                look: "golden-blonde, warm cinematic smile",
+                avatar: `${AVATAR_BASE}/cinematic_male_adrien_top.png${AVATAR_Q}`
+            },
+            {
+                name: "Richard",
+                look: "dark intense eyes, moody navy suit",
+                avatar: `${AVATAR_BASE}/cinematic_male_richard_top.png${AVATAR_Q}`
+            },
+            {
+                name: "Damon",
+                look: "messy brown hair, sunny sweet vibe",
+                avatar: `${AVATAR_BASE}/cinematic_male_damon_bottom.png${AVATAR_Q}`
+            },
+            {
+                name: "Lucas",
+                look: "wavy dark hair, neon cool mood",
+                avatar: `${AVATAR_BASE}/cinematic_male_lucas_bottom.png${AVATAR_Q}`
+            }
+            ],
+            comic: [
+            {
+                name: "Adrien",
+                look: "bold comic hero vibe",
+                avatar: `${AVATAR_BASE}/comic_male_adrien_top.png${AVATAR_Q}`
+            },
+            {
+                name: "Richard",
+                look: "sharp comic office style",
+                avatar: `${AVATAR_BASE}/comic_male_richard_top.png${AVATAR_Q}`
+            },
+            {
+                name: "Damon",
+                look: "friendly comic casual look",
+                avatar: `${AVATAR_BASE}/comic_male_damon_bottom.png${AVATAR_Q}`
+            },
+            {
+                name: "Lucas",
+                look: "cool comic street mood",
+                avatar: `${AVATAR_BASE}/comic_male_lucas_bottom.png${AVATAR_Q}`
+            }
+            ]
+        };
+        const PROFILE_OPTIONS_BY_STYLE = {
+            cinematic: [
+            {
+                id: "p20_25",
+                label: "Fresh Chic",
+                look: "bob hair, warm cafe mood",
+                profile: "young woman, short bob hair, wearing a cozy warm oversized sweater, soft smooth flawless skin",
+                avatar: `${AVATAR_BASE}/cinematic_female_fresh_chic.png${AVATAR_Q}`
+            },
+            {
+                id: "p26_30",
+                label: "Night Elegance",
+                look: "long black hair, candlelit dinner",
+                profile: "young woman, long straight black hair, wearing an elegant silk evening gown, soft smooth flawless skin",
+                avatar: `${AVATAR_BASE}/cinematic_female_night_elegance.png${AVATAR_Q}`
+            },
+            {
+                id: "p31_36",
+                label: "Executive Aura",
+                look: "confident office style",
+                profile: "young woman, sharp confident eyes, wearing a tailored black blazer, confident office style, soft smooth flawless skin",
+                avatar: `${AVATAR_BASE}/cinematic_female_executive_aura.png${AVATAR_Q}`
+            },
+            {
+                id: "p37_40",
+                label: "Grace Classic",
+                look: "auburn updo, gallery elegance",
+                profile: "young woman, auburn hair tied in an elegant updo, wearing a classic chic vintage dress, soft smooth flawless skin",
+                avatar: `${AVATAR_BASE}/cinematic_female_grace_classic.png${AVATAR_Q}`
+            }
+            ],
+            comic: [
+            {
+                id: "p20_25",
+                label: "Fresh Chic",
+                look: "comic bob, playful smile",
+                profile: "young woman, short bob hair, playful comic style",
+                avatar: `${AVATAR_BASE}/comic_female_fresh_chic.png${AVATAR_Q}`
+            },
+            {
+                id: "p26_30",
+                label: "Night Elegance",
+                look: "comic long black hair",
+                profile: "young woman, long black hair, elegant comic style",
+                avatar: `${AVATAR_BASE}/comic_female_night_elegance.png${AVATAR_Q}`
+            },
+            {
+                id: "p31_36",
+                label: "Executive Aura",
+                look: "comic confident office vibe",
+                profile: "young woman, confident comic office style",
+                avatar: `${AVATAR_BASE}/comic_female_executive_aura.png${AVATAR_Q}`
+            },
+            {
+                id: "p37_40",
+                label: "Grace Classic",
+                look: "comic classic elegance",
+                profile: "young woman, classic elegant comic style",
+                avatar: `${AVATAR_BASE}/comic_female_grace_classic.png${AVATAR_Q}`
+            }
+            ]
+        };
+
+        function getCharacterOptions() {
+            return CHARACTER_OPTIONS_BY_STYLE[avatarStyle] || CHARACTER_OPTIONS_BY_STYLE.cinematic;
+        }
+        function getProfileOptions() {
+            return PROFILE_OPTIONS_BY_STYLE[avatarStyle] || PROFILE_OPTIONS_BY_STYLE.cinematic;
+        }
+
+        let avatarStyle = "cinematic";
+        let character = "Adrien";
+        let profileId = "p20_25";
+        
+        let currentWords = [];
+        let storySentences = []; 
+        let lastSuccessfulSentence = "";
+        let storyStyle = "mature_romantic";
+        let storyMode = "romance";
+        let protagonistProfile = getProfileOptions()[0].profile;
+        let wordCount = 3;
+        let recentWords = [];
+        let diamonds = 0;
+        let imageTickets = 0;
+
+        function loadEconomy() {
+            try {
+                const raw = localStorage.getItem(ECONOMY_STORAGE_KEY);
+                if (!raw) return;
+                const parsed = JSON.parse(raw);
+                diamonds = Number(parsed.diamonds || 0);
+                imageTickets = Number(parsed.imageTickets || 0);
+            } catch (_) {}
+        }
+
+        function saveEconomy() {
+            localStorage.setItem(ECONOMY_STORAGE_KEY, JSON.stringify({ diamonds, imageTickets }));
+        }
+
+        function renderEconomy() {
+            document.getElementById("diamond-count").innerText = String(diamonds);
+            document.getElementById("ticket-count").innerText = String(imageTickets);
+            document.getElementById("redeem-btn").disabled = diamonds < 50;
+        }
+
+        function addDiamonds(amount) {
+            diamonds += amount;
+            saveEconomy();
+            renderEconomy();
+        }
+
+        function redeemTickets() {
+            if (diamonds < 50) {
+                alert("Not enough diamonds (need 50). Complete more sentences and storybooks to earn more.");
+                return;
+            }
+            diamonds -= 50;
+            imageTickets += 5;
+            saveEconomy();
+            renderEconomy();
+            alert("Redeemed successfully: +5 image tickets 🎉");
+        }
+
+        function renderCharacterPicker() {
+            const wrap = document.getElementById("character-picker");
+            const opts = getCharacterOptions();
+            wrap.innerHTML = opts.map((c) => `
+                <div class="char-card ${c.name === character ? "active" : ""}" data-name="${c.name}">
+                    <img class="char-avatar" src="${c.avatar}" alt="${c.name}" />
+                    <div class="char-name">${c.name}</div>
+                    <div class="char-look">${c.look}</div>
+                </div>
+            `).join("");
+            wrap.querySelectorAll(".char-card").forEach((el) => {
+                el.addEventListener("click", () => {
+                    character = el.getAttribute("data-name");
+                    document.getElementById("ui-char").innerText = character;
+                    renderCharacterPicker();
+                    fetchStoryline();
+                    fetchWords();
+                });
+            });
+        }
+
+        function renderProfilePicker() {
+            const wrap = document.getElementById("profile-picker");
+            const opts = getProfileOptions();
+            wrap.innerHTML = opts.map((p) => `
+                <div class="char-card ${p.id === profileId ? "active" : ""}" data-id="${p.id}">
+                    <img class="char-avatar" src="${p.avatar}" alt="${p.label}" />
+                    <div class="char-name">${p.label}</div>
+                    <div class="char-look">${p.look}</div>
+                </div>
+            `).join("");
+            wrap.querySelectorAll(".char-card").forEach((el) => {
+                el.addEventListener("click", () => {
+                    profileId = el.getAttribute("data-id");
+                    const options = getProfileOptions();
+                    const picked = options.find((p) => p.id === profileId) || options[0];
+                    protagonistProfile = picked.profile;
+                    renderProfilePicker();
+                    fetchStoryline();
+                    fetchWords();
+                });
+            });
+        }
+
+        function openImageReviewPage(imageUrl, sentenceText, titleText) {
+            const w = window.open("", "_blank");
+            if (!w) return alert("Pop-up blocked. Please allow pop-ups for this site.");
+
+            const safeSentence = (sentenceText || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            const safeTitle = (titleText || "Word Wizard").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            w.document.write(`
+                <!doctype html>
+                <html>
+                <head>
+                  <meta charset="utf-8" />
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+                  <title>${safeTitle}</title>
+                  <style>
+                    body{font-family:Segoe UI,Tahoma,Geneva,Verdana,sans-serif;margin:0;padding:18px;background:#111;color:#eee;}
+                    .wrap{max-width:900px;margin:0 auto;}
+                    .card{background:#1e1e1e;border-radius:12px;padding:16px;}
+                    img{width:100%;border-radius:10px;display:block;}
+                    .cap{margin-top:12px;font-size:16px;line-height:1.5;background:rgba(255,255,255,0.06);padding:12px;border-radius:10px;}
+                    a{color:#a78bfa;}
+                    .bar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap;}
+                    .btn{background:#10b981;color:#fff;padding:10px 14px;border-radius:999px;text-decoration:none;display:inline-block;}
+                  </style>
+                </head>
+                <body>
+                  <div class="wrap">
+                    <div class="card">
+                      <img src="${imageUrl}" alt="scene" />
+                      <div class="cap">${safeSentence}</div>
+                      <div class="bar">
+                        <a class="btn" href="${imageUrl}" download>Download image</a>
+                        <span style="opacity:.7">You can close this tab and go back.</span>
+                      </div>
+                    </div>
+                  </div>
+                </body>
+                </html>
+            `);
+            w.document.close();
+        }
+
+        async function fetchStoryline() {
+            try {
+                const res = await fetch(`${API_BASE}/get_storyline`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        sentences: [],
+                        scene,
+                        character,
+                        story_style: storyStyle,
+                        story_mode: storyMode,
+                        protagonist_profile: protagonistProfile
+                    })
+                });
+                const data = await res.json();
+                const box = document.getElementById('storyline-box');
+                if (!data || data.status !== "success" || !data.storyline) {
+                    box.innerHTML = "Route preview unavailable.";
+                    return;
+                }
+                const title = data.storyline.title || "Story Route";
+                const intro = data.storyline.intro || "";
+                if (intro) {
+                    box.innerHTML = `<b>${title}</b><br>${intro}`;
+                    return;
+                }
+                const beats = Array.isArray(data.storyline.beats) ? data.storyline.beats : [];
+                box.innerHTML = `<b>${title}</b><br>${beats.join(" ")}`;
+            } catch (e) {
+                document.getElementById('storyline-box').innerHTML = "Route preview unavailable.";
+            }
+        }
+
+        async function fetchWords() {
+            document.getElementById('word-container').innerHTML = "Loading words...";
+            document.getElementById('submit-btn').disabled = true;
+            
+            try {
+                const res = await fetch(`${API_BASE}/get_words`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        scene,
+                        character,
+                        word_count: wordCount,
+                        story_style: storyStyle,
+                        story_mode: storyMode,
+                        protagonist_profile: protagonistProfile,
+                        recent_words: recentWords
+                    })
+                });
+                const data = await res.json();
+                currentWords = data.words;
+                // 更新 recentWords，避免重复
+                recentWords = [...recentWords, ...currentWords].slice(-60);
+                
+                document.getElementById('word-container').innerHTML = currentWords.map(w => `<span class="word-tag">${w}</span>`).join('');
+                document.getElementById('submit-btn').disabled = false;
+            } catch (err) {
+                document.getElementById('word-container').innerHTML = "Error loading words. Is backend running?";
+                console.error(err);
+            }
+        }
+
+        async function submitSentence() {
+            const sentence = document.getElementById('sentence-input').value.trim();
+            if (!sentence) return alert("Please enter a sentence!");
+
+            const btn = document.getElementById('submit-btn');
+            const loading = document.getElementById('loading');
+            const feedback = document.getElementById('feedback');
+            const imageEl = document.getElementById('scene-image');
+            const overlayEl = document.getElementById('sentence-overlay');
+            const sceneAreaEl = document.getElementById('scene-area');
+            const actionsEl = document.getElementById('image-actions');
+            const saveBtn = document.getElementById('save-btn');
+            const nextBtn = document.getElementById('next-btn');
+
+            btn.disabled = true;
+            loading.style.display = "block";
+            feedback.innerHTML = "";
+            imageEl.style.display = "none";
+            sceneAreaEl.style.display = "none";
+
+            try {
+                const res = await fetch(`${API_BASE}/process_turn`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        sentence,
+                        required_words: currentWords,
+                        scene,
+                        character,
+                        story_style: storyStyle,
+                        story_mode: storyMode,
+                        protagonist_profile: protagonistProfile
+                    })
+                });
+                const data = await res.json();
+
+                if (data.status === "failed") {
+                    feedback.innerHTML = `❌ ${data.check_result.feedback}<br>Suggested: <i>${data.check_result.corrected_sentence}</i>`;
+                    btn.disabled = false;
+                } else if (data.status === "success") {
+                    feedback.innerHTML = `✅ ${data.check_result.feedback}`;
+                    lastSuccessfulSentence = sentence;
+                    overlayEl.innerText = sentence;
+                    addDiamonds(5); // 每个句子完成 +5 钻
+
+                    // 处理 NSFW：句子通过但不出图
+                    if (data.nsfw_blocked) {
+                        imageEl.style.display = "none";
+                        saveBtn.disabled = true;
+                        nextBtn.disabled = false;
+                        feedback.innerHTML += `<br><span style="color:#ffb74d;">Image blocked by NSFW filter, please try a more subtle / less explicit description.</span>`;
+                    } else if (data.validation_failed) {
+                        imageEl.style.display = "none";
+                        saveBtn.disabled = true;
+                        nextBtn.disabled = false;
+                        feedback.innerHTML += `<br><span style="color:#fbbf24;">这次图片没成功生成双人同框（系统已自动重试多次）。请直接再点一次提交，我会继续按双人优先生成。</span>`;
+                    } else if (data.validation_failed_soft) {
+                        nextBtn.disabled = true;
+                        imageEl.onload = () => { nextBtn.disabled = false; };
+                        imageEl.src = data.image_url;
+                        imageEl.style.display = "block";
+                        saveBtn.disabled = false;
+                        saveBtn.onclick = () => openImageReviewPage(data.image_url, lastSuccessfulSentence, `Round ${currentRound}`);
+                        feedback.innerHTML += `<br><span style="color:#fbbf24;">已展示当前可用图片。如果你想要更稳定的双人同框，直接再点一次提交即可。</span>`;
+                    } else if (data.rate_limited) {
+                        imageEl.style.display = "none";
+                        saveBtn.disabled = true;
+                        nextBtn.disabled = false;
+                        feedback.innerHTML += `<br><span style="color:#fbbf24;">出图服务当前限流，稍等几秒再点一次提交即可。</span>`;
+                    } else {
+                        nextBtn.disabled = true; // 等图片真的加载完再允许下一句
+                        imageEl.onload = () => { nextBtn.disabled = false; };
+                        imageEl.src = data.image_url;
+                        imageEl.style.display = "block";
+                        saveBtn.disabled = false;
+                        saveBtn.onclick = () => openImageReviewPage(data.image_url, lastSuccessfulSentence, `Round ${currentRound}`);
+                    }
+
+                    storySentences.push(sentence); 
+
+                    // 展示图片区 + 操作区：停留，等用户点下一句
+                    sceneAreaEl.style.display = "flex";
+                    nextBtn.onclick = () => {
+                        sceneAreaEl.style.display = "none";
+                        imageEl.style.display = "none";
+                        feedback.innerHTML = "";
+                        document.getElementById('sentence-input').value = "";
+
+                        if (currentRound < MAX_ROUNDS) {
+                            currentRound++;
+                            document.getElementById('round-counter').innerText = `Round ${currentRound} / ${MAX_ROUNDS}`;
+                            fetchWords(); 
+                        } else {
+                            generateFinalStory(); 
+                        }
+                    };
+
+                    // 提交本轮结束，等用户点下一句
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                feedback.innerHTML = "Error processing sentence.";
+                console.error(err);
+                btn.disabled = false;
+            } finally {
+                loading.style.display = "none";
+            }
+        }
+
+        async function generateFinalStory() {
+            document.getElementById('game-container').style.display = "none";
+            document.getElementById('story-container').style.display = "block";
+            document.getElementById('final-story-text').innerHTML = "✨ Weaving your sentences into a story... This might take a moment. ✨";
+            document.getElementById('story-images').innerHTML = "";
+            
+            try {
+                const res = await fetch(`${API_BASE}/generate_final_story`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        sentences: storySentences,
+                        scene,
+                        character,
+                        story_style: storyStyle,
+                        story_mode: storyMode,
+                        protagonist_profile: protagonistProfile
+                    })
+                });
+                const data = await res.json();
+                
+                document.getElementById('cover-image').src = data.cover_image_url;
+                document.getElementById('final-story-text').innerHTML = data.story_text;
+                addDiamonds(10); // 绘本完成 +10 钻
+
+                const urls = Array.isArray(data.image_urls) ? data.image_urls : [];
+                const storyImagesEl = document.getElementById('story-images');
+                if (urls.length) {
+                    storyImagesEl.innerHTML = urls.map((u, idx) => {
+                        if (!u) return `<div class="card" style="padding:12px;border-radius:10px;background:#222;">Image ${idx+1} unavailable.</div>`;
+                        const caption = (storySentences[idx] || "").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+                        return `
+                          <div class="img-wrap">
+                            <img src="${u}" style="width:100%;border-radius:8px;display:block;" />
+                            <div class="sentence-overlay" style="border-radius:0 0 8px 8px;">${caption}</div>
+                            <div style="margin-top:8px;display:flex;justify-content:flex-end;">
+                              <button class="success" style="width:auto;padding:8px 14px;" onclick="openImageReviewPage('${u}', '${(storySentences[idx] || "").replace(/\\/g,"\\\\").replace(/'/g,"\\'")}', 'Story Image ${idx+1}')">Save / Open</button>
+                            </div>
+                          </div>
+                        `;
+                    }).join('');
+                }
+            } catch (err) {
+                document.getElementById('final-story-text').innerHTML = "Failed to generate story.";
+                console.error(err);
+            }
+        }
+
+        window.onload = () => {
+            document.title = `Word Wizard (${APP_VERSION})`;
+            document.getElementById('app-version').innerText = `Runtime: app.html | Version: ${APP_VERSION}`;
+            console.log(`[Word Wizard] ${APP_VERSION} loaded`);
+            document.getElementById("ui-char").innerText = character;
+            renderCharacterPicker();
+            renderProfilePicker();
+            loadEconomy();
+            renderEconomy();
+            document.getElementById("redeem-btn").addEventListener("click", redeemTickets);
+
+            const modeSel = document.getElementById('mode-select');
+            const styleSel = document.getElementById('style-select');
+            const wcSel = document.getElementById('wordcount-select');
+            const portraitStyleSel = document.getElementById('portrait-style-select');
+            portraitStyleSel.addEventListener('change', () => {
+                avatarStyle = portraitStyleSel.value;
+                const charOpts = getCharacterOptions();
+                if (!charOpts.some((c) => c.name === character)) {
+                    character = charOpts[0].name;
+                    document.getElementById("ui-char").innerText = character;
+                }
+                const profileOpts = getProfileOptions();
+                if (!profileOpts.some((p) => p.id === profileId)) {
+                    profileId = profileOpts[0].id;
+                }
+                protagonistProfile = (profileOpts.find((p) => p.id === profileId) || profileOpts[0]).profile;
+                renderCharacterPicker();
+                renderProfilePicker();
+                fetchStoryline();
+                fetchWords();
+            });
+            modeSel.addEventListener('change', () => {
+                storyMode = modeSel.value;
+                fetchStoryline();
+                fetchWords();
+            });
+            styleSel.addEventListener('change', () => {
+                storyStyle = styleSel.value;
+                fetchStoryline();
+                fetchWords();
+            });
+            wcSel.addEventListener('change', () => {
+                wordCount = Number(wcSel.value) || 3;
+                fetchWords();
+            });
+            fetchStoryline();
+            fetchWords();
+        };
+    </script>
+</body>
+</html>
