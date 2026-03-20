@@ -1,4 +1,4 @@
-app = "word-wizard-backend"
+app = "backend-black-snow-4374"
 primary_region = "nrt"
 
 [http_service]
