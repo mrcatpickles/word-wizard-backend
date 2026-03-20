@@ -1,20 +1,14 @@
-app = 'word-wizard-backend'
-primary_region = 'nrt'
-
-[build]
+app = "word-wizard-backend"
+primary_region = "nrt"
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = 'stop'
+  auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 1
 
 [[vm]]
-  memory = '1gb'
-  cpu_kind = 'shared'
+  memory = "1gb"
+  cpu_kind = "shared"
   cpus = 1
-
-# --- 关键：增加下面这两行，强制指定启动路径 ---
-[processes]
-  app = "uvicorn backend.main:app --host 0.0.0.0 --port 8080"
