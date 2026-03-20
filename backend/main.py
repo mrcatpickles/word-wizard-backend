@@ -1,14 +1,14 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 import os
 import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# 1. 暴力开启跨域，确保你本地和云端都能通
+# 开启所有跨域权限
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # 暂时允许所有来源，先跑通再说
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -16,19 +16,20 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "Word Wizard Backend is running!"}
+    return {"status": "ok", "message": "Backend is running on Fly.io!"}
 
+# --- 你的业务接口 ---
 @app.post("/api/get_words")
 async def get_words(data: dict):
-    # 这里放你原来的 get_words 逻辑
-    return {"status": "success", "words": ["Magic", "Wizard", "Power"]}
+    return {"status": "success", "words": ["magic", "wizard", "spell"]}
 
 @app.post("/api/process_turn")
 async def process_turn(data: dict):
-    # 这里放你原来的 process_turn 逻辑
-    return {"status": "success", "check_result": {"is_correct": True, "feedback": "Good job!"}}
+    return {"status": "success", "check_result": {"is_correct": True, "feedback": "Nice!"}}
 
-# 2. 关键：必须监听 0.0.0.0 和环境变量中的 PORT
+# --- 必须这样写才能在云端跑通 ---
 if __name__ == "__main__":
+    # 获取环境变量 PORT，没有则默认 8080
     port = int(os.environ.get("PORT", 8080))
+    # 必须是 0.0.0.0
     uvicorn.run(app, host="0.0.0.0", port=port)
