@@ -183,8 +183,22 @@ OPENAI_API_KEY = _clean_env_value(os.getenv("OPENAI_API_KEY")) or OPENROUTER_API
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 
 app = FastAPI()
+
+# CORS: 明确允许本地开发前端访问（浏览器会严格校验 Origin）
+origins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+    "https://word-wizard-backend.fly.dev",
+]
+
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"]
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # 启动时提醒：浏览器开代理 ≠ 后端走代理；未配置则 OpenRouter 仍直连，易 403 region
