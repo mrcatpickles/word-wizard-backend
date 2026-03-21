@@ -1,5 +1,5 @@
 app = "backend-black-snow-4374"
-primary_region = "sin"
+primary_region = "sjc"
 
 [http_service]
   internal_port = 8080
