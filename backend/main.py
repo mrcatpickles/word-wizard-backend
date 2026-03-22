@@ -3,8 +3,6 @@ import json
 import asyncio
 import random
 import re
-import io
-import tempfile
 import traceback
 from typing import Any
 from fastapi import FastAPI, HTTPException
@@ -23,8 +21,9 @@ IMAGE_MODEL_PRIMARY = os.getenv(
 )
 
 # --- 对话/文本模型（OpenRouter）---
-# 按用户要求恢复默认到 GPT-4o；可用 CHAT_MODEL 覆盖。
-CHAT_MODEL = os.getenv("CHAT_MODEL", "openai/gpt-4o")
+# 默认用 Gemini Flash：在 OpenRouter 上地区限制通常比纯 OpenAI 模型更宽松；可用 CHAT_MODEL 覆盖。
+# 见 https://openrouter.ai/google/gemini-2.0-flash-001
+CHAT_MODEL = os.getenv("CHAT_MODEL", "google/gemini-2.0-flash-001")
 
 # --- 统一画风配置（彩色柔光电影质感，避免“突然动漫风”与黑白片） ---
 STYLE_PRESETS = {
@@ -41,167 +40,6 @@ STYLE_PRESETS = {
         "same character design and consistent appearance, no text, no watermark, not black and white, not monochrome, vivid pastel colors"
     ),
 }
-
-# 统一加在每条 Replicate 生图 prompt 最前：压制「黑白画册 / 三拼版 / 伪艺术 B&W」
-COLOR_CINEMA_PREFIX = (
-    "MANDATORY FULL COLOR RGB photograph — natural skin tones, colored clothing and environment, "
-    "warm golden cinematic lighting, rich modern romance-movie color grade, "
-    "NOT black and white, NOT monochrome, NOT grayscale, NOT duotone, NOT editorial B&W, "
-    "NOT open book layout, NOT two-page spread, NOT triptych catalog, NOT sketchbook panels. "
-)
-
-# 美式漫画线稿上色（与「电影剧照」二选一，由 portrait_style 控制）
-COMIC_STYLE_PRESETS = {
-    "mature_romantic": (
-        "color western comic book illustration, bold clean line art, cel shading, vibrant saturated colors, "
-        "romantic drama graphic novel panel, NOT live-action photography, NOT photorealistic DSLR still, "
-        "consistent character design, young attractive adults, same visual style across series, "
-        "no text, no watermark, not black and white, not monochrome, rich comic book colors"
-    ),
-    "young_cute": (
-        "color bright comic illustration, clean lines, soft cel shading, lighthearted romantic graphic novel style, "
-        "NOT photorealistic photograph, NOT movie still, vivid pastel comic colors, "
-        "no text, no watermark, not black and white, not monochrome"
-    ),
-}
-
-COLOR_COMIC_PREFIX = (
-    "MANDATORY full-color comic BOOK illustration — NOT photograph, NOT movie still, NOT DSLR, NOT 35mm film, "
-    "clear line art with cel shading or flat colors, NOT black and white, NOT monochrome grayscale, "
-    "NOT triptych catalog, NOT three-panel layout, NOT sketchbook spread. "
-)
-
-# 统一追加在每条生图 prompt 末尾（Replicate SDXL / PhotoMaker / 兜底 prompt 均经 _sdxl_generate_image）
-# 强调原生 1:1 方图，便于社交分享与前端满幅，避免宽幅黑边
-CINEMA_QUALITY_SUFFIX = (
-    "square portrait composition, 1:1 aspect ratio native output, centered dramatic scene, "
-    "masterpiece, ultra-detailed, 8k resolution, subtle film grain, shallow depth of field, "
-    "dramatic chiaroscuro lighting, dramatic shadows, moody atmosphere, rich silk fabric texture, intricate gold embroidery, "
-    "subjects centered and perfectly contained within the square frame, full-bleed square image, edge-to-edge, "
-    "no letterboxing, no pillarboxing, no split composition, no empty margins."
-)
-
-# 强制排除动漫 + 失败兜底（合并进所有生图 negative_prompt）
-NO_ANIME_STYLE = (
-    "anime, cartoon, comic, drawing, illustration, sketch, 2d, painting, render, vector art, "
-    "duplicate characters, unnatural interaction, incomplete frame, whitespace on edges"
-)
-
-# 禁止「参考图左右拼接」被模型抄成输出：双联肖像、分屏、黑边留白
-NO_SPLIT_COMPOSITION = (
-    "diptych, triptych, split screen, split-screen, two panels, side by side portraits, "
-    "two photos side by side, collage layout, collage of two images, before and after, "
-    "twin panel layout, duplicate panel, letterboxing, pillarboxing, black bars, "
-    "empty black area, large black void, negative space on the side, unused canvas area"
-)
-
-# 与 frontend/public/split_faces 文件名一致（cinematic / comic）
-_SPLIT_FACE_MALE_CINEMATIC: dict[str, str] = {
-    "Adrien": "cinematic_male_adrien_top.png",
-    "Richard": "cinematic_male_richard_top.png",
-    "Damon": "cinematic_male_damon_bottom.png",
-    "Lucas": "cinematic_male_lucas_bottom.png",
-}
-_SPLIT_FACE_MALE_COMIC: dict[str, str] = {
-    "Adrien": "comic_male_adrien_top.png",
-    "Richard": "comic_male_richard_top.png",
-    "Damon": "comic_male_damon_bottom.png",
-    "Lucas": "comic_male_lucas_bottom.png",
-}
-_SPLIT_FACE_FEMALE_CINEMATIC: dict[str, str] = {
-    "Fresh Chic": "cinematic_female_fresh_chic.png",
-    "Night Elegance": "cinematic_female_night_elegance.png",
-    "Executive Aura": "cinematic_female_executive_aura.png",
-    "Grace Classic": "cinematic_female_grace_classic.png",
-}
-_SPLIT_FACE_FEMALE_COMIC: dict[str, str] = {
-    "Fresh Chic": "comic_female_fresh_chic.png",
-    "Night Elegance": "comic_female_night_elegance.png",
-    "Executive Aura": "comic_female_executive_aura.png",
-    "Grace Classic": "comic_female_grace_classic.png",
-}
-
-
-def _split_face_filenames(character: str, female_name: str, portrait_style: str) -> tuple[str, str]:
-    ps = (portrait_style or "cinematic").strip().lower()
-    if ps == "comic":
-        m = _SPLIT_FACE_MALE_COMIC.get(character, _SPLIT_FACE_MALE_COMIC["Adrien"])
-        f = _SPLIT_FACE_FEMALE_COMIC.get(female_name, _SPLIT_FACE_FEMALE_COMIC["Night Elegance"])
-    else:
-        m = _SPLIT_FACE_MALE_CINEMATIC.get(character, _SPLIT_FACE_MALE_CINEMATIC["Adrien"])
-        f = _SPLIT_FACE_FEMALE_CINEMATIC.get(female_name, _SPLIT_FACE_FEMALE_CINEMATIC["Night Elegance"])
-    return m, f
-
-
-def _split_faces_dir() -> str:
-    """
-    优先使用与 main.py 同目录下的 split_faces/（Docker / Fly 镜像内会打包，避免依赖 ../frontend）。
-    本地开发仍可用仓库里的 frontend/public/split_faces。
-    """
-    here = os.path.dirname(os.path.abspath(__file__))
-    bundled = os.path.join(here, "split_faces")
-    if os.path.isdir(bundled):
-        return bundled
-    return os.path.abspath(os.path.join(here, "..", "frontend", "public", "split_faces"))
-
-
-def _split_face_local_paths(character: str, female_name: str, portrait_style: str) -> tuple[str, str]:
-    mf, ff = _split_face_filenames(character, female_name, portrait_style)
-    base = _split_faces_dir()
-    return os.path.join(base, mf), os.path.join(base, ff)
-
-
-def _concat_two_face_refs_horizontal(left_path: str, right_path: str) -> str | None:
-    """左右拼接男女参考脸，供 PhotoMaker 单 input_image；失败返回 None。"""
-    try:
-        from PIL import Image
-
-        if not (os.path.isfile(left_path) and os.path.isfile(right_path)):
-            return None
-        im1 = Image.open(left_path).convert("RGB")
-        im2 = Image.open(right_path).convert("RGB")
-        h = max(im1.height, im2.height)
-        w1 = int(im1.width * h / im1.height)
-        w2 = int(im2.width * h / im2.height)
-        im1 = im1.resize((w1, h), Image.Resampling.LANCZOS)
-        im2 = im2.resize((w2, h), Image.Resampling.LANCZOS)
-        total = Image.new("RGB", (w1 + w2, h))
-        total.paste(im1, (0, 0))
-        total.paste(im2, (w1, 0))
-        fd, out = tempfile.mkstemp(suffix=".png", prefix="ww_dual_ref_")
-        os.close(fd)
-        total.save(out, format="PNG")
-        return out
-    except Exception as e:
-        print(f"⚠️ _concat_two_face_refs_horizontal: {e}")
-        return None
-
-
-def _is_photomaker_disposable_temp(path: str) -> bool:
-    """仅删除临时拼接的参考 PNG（ww_dual_ref_*），绝不删除 split_faces 仓库内资源。"""
-    if not path or not isinstance(path, str):
-        return False
-    if not path.endswith(".png"):
-        return False
-    return os.path.basename(path).startswith("ww_dual_ref_")
-
-
-def _build_ref_image_line_prompt(male_name: str, female_name: str, scene_hint: str) -> str:
-    """1:1 方图开场句 + ref image 对应选中角色（双人或单人）。"""
-    mn = (male_name or "").strip() or "male lead"
-    fn = (female_name or "").strip()
-    sh = (scene_hint or "").strip() or "a dimly lit, sophisticated ballroom"
-    if fn:
-        return (
-            f"A square portrait composition, 1:1 aspect ratio, centered dramatic scene capturing {mn} "
-            f"(male, facial identity from reference image) and {fn} "
-            f"(female, matching the selected protagonist look described in this prompt) "
-            f"interacting in {sh}. Both characters centered and contained within the square frame. "
-        )
-    return (
-        f"A square portrait composition, 1:1 aspect ratio, centered dramatic scene capturing {mn} "
-        f"(male, facial identity from reference image) in {sh}. "
-    )
 
 # 禁止“两个男的同框”：所有双人图都必须是 1 男 1 女
 NO_TWO_MALES = (
@@ -248,7 +86,7 @@ NO_SOLO_CROP = "single person close-up, cropped to one face, other character out
 REPLICATE_NEGATIVE_EXTRA_FACES = (
     "mutated faces, fused faces, fused face, extra faces, duplicate face, two faces one head, "
     "extra people, extra person, crowd, crowds, groups, group shot, group photo, gathering, "
-    "disfigured, deformed face, many people, huge crowd, 3 people, three people, third person, "
+    "disfigured, deformed face, multiple people, many people, 3 people, three people, third person, "
     "fourth person, background crowd in focus, audience faces, stranger beside subject, "
     "two men, yaoi, cloned face, identical duplicate faces, split face, "
     "text, watermark, subtitle, logo, caption, letters, typography"
@@ -263,8 +101,7 @@ REPLICATE_NEGATIVE_ULTIMATE = (
     "two women, 2 girls, two females, both women, female duo, no man in frame, only women, "
     "stubby fingers, lumpy hands, blocky hand, weird hand gesture, clenched fist, hands up center, "
     "thick arm, disproportionate arm, bulky arm, oversized bicep, distorted arm, "
-    f"{NO_SOLO_CROP}, "
-    f"{NO_ANIME_STYLE}, {NO_SPLIT_COMPOSITION}"
+    f"{NO_SOLO_CROP}"
 )
 
 # 单人构图专用：在 ULTIMATE 之上再压「第二人入画」
@@ -281,20 +118,7 @@ NEGATIVE_PROMPT_BASE = (
     "lowres, blurry, bad anatomy, extra fingers, deformed, "
     "black and white, monochrome, grayscale, desaturated, low-saturation, "
     "nudity, explicit, fetish, "
-    f"{NO_TWO_MALES}, {BAD_HANDS}, {BAD_ARMS}, {ANTI_MUTATION_CURSE}, "
-    f"{NO_ANIME_STYLE}, {NO_SPLIT_COMPOSITION}"
-)
-
-# 漫画模式：允许「插画」，禁止「照片写实」与多余面孔
-NEGATIVE_PROMPT_COMIC = (
-    f"{REPLICATE_NEGATIVE_EXTRA_FACES}, "
-    "photorealistic, photorealism, hyperrealistic, DSLR photograph, movie still, 35mm film, cinematic photograph, "
-    "chibi, 3d render, cgi, plastic skin, "
-    "lowres, blurry, bad anatomy, extra fingers, deformed, "
-    "black and white, monochrome, grayscale, desaturated, low-saturation, "
-    "nudity, explicit, fetish, "
-    f"{NO_TWO_MALES}, {BAD_HANDS}, {BAD_ARMS}, {ANTI_MUTATION_CURSE}, "
-    f"{NO_ANIME_STYLE}, {NO_SPLIT_COMPOSITION}"
+    f"{NO_TWO_MALES}, {BAD_HANDS}, {BAD_ARMS}, {ANTI_MUTATION_CURSE}"
 )
 
 # 未成年人额外负面词（在 BASE 之上再加一层，收紧姿态与氛围）
@@ -359,6 +183,13 @@ OPENROUTER_API_KEY = _clean_env_value(os.getenv("OPENROUTER_API_KEY"))
 OPENAI_API_KEY = _clean_env_value(os.getenv("OPENAI_API_KEY")) or OPENROUTER_API_KEY
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 
+# DALL-E 3 直连 OpenAI（不走 OpenRouter）
+# 在 backend/.env 设 OPENAI_DIRECT_API_KEY=sk-xxx 即可启用
+# IMAGE_BACKEND=dalle3  → 优先 DALL-E 3，失败回退 SDXL
+# IMAGE_BACKEND=sdxl    → 只用 SDXL（默认）
+OPENAI_DIRECT_API_KEY = _clean_env_value(os.getenv("OPENAI_DIRECT_API_KEY"))
+IMAGE_BACKEND = os.getenv("IMAGE_BACKEND", "sdxl").strip().lower()  # "sdxl" | "dalle3"
+
 app = FastAPI()
 
 # CORS: 明确允许本地开发前端访问（浏览器会严格校验 Origin）
@@ -393,7 +224,7 @@ if _or_proxy:
 else:
     print(
         "👉 OpenRouter/Replicate: 未配置代理（直连）。若报 region 403，请在 backend/.env 写 "
-        "OPENROUTER_PROXY=http://127.0.0.1:8001（端口改成 Clash/V2Ray 的「HTTP 代理」端口），然后重启后端。"
+        "OPENROUTER_PROXY=http://127.0.0.1:7890（端口改成 Clash/V2Ray 的「HTTP 代理」端口），然后重启后端。"
     )
 
 # Serve repo-root `asset/` folder (e.g., bgm files) at `/asset/*`
@@ -401,12 +232,6 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _ASSET_DIR = os.path.join(_REPO_ROOT, "asset")
 if os.path.isdir(_ASSET_DIR):
     app.mount("/asset", StaticFiles(directory=_ASSET_DIR), name="asset")
-
-# 与 _split_faces_dir() 一致，便于 Fly 上 /split_faces/*.png 可被 Replicate 拉取（替代 localhost 参考图）
-_SPLIT_FACES_MOUNT_DIR = _split_faces_dir()
-if os.path.isdir(_SPLIT_FACES_MOUNT_DIR):
-    app.mount("/split_faces", StaticFiles(directory=_SPLIT_FACES_MOUNT_DIR), name="split_faces")
-    print(f"👉 split_faces 静态资源: /split_faces → {_SPLIT_FACES_MOUNT_DIR}")
 
 # --- 请求模型 ---
 class GetWordsRequest(BaseModel):
@@ -433,10 +258,6 @@ class ProcessTurnRequest(BaseModel):
         default="young woman, shoulder-length dark hair, smart casual outfit",
         description="User protagonist appearance profile for image consistency",
     )
-    protagonist_name: str = Field(
-        default="",
-        description="女主人设名（如 Night Elegance），用于生图 prompt 双人同框点名",
-    )
     portrait_style: str = Field(default="cinematic", description="cinematic | comic")
     character_reference_url: str | None = None
     protagonist_reference_url: str | None = None
@@ -454,14 +275,9 @@ class FinalStoryRequest(BaseModel):
         default="young woman, shoulder-length dark hair, smart casual outfit",
         description="User protagonist appearance profile for image consistency",
     )
-    protagonist_name: str = Field(
-        default="",
-        description="女主人设名，与 process_turn 一致",
-    )
     is_adult: bool = Field(default=False, description="True if user confirmed 18+ at entry")
     character_reference_url: str | None = None
     protagonist_reference_url: str | None = None
-    portrait_style: str = Field(default="cinematic", description="cinematic | comic — 终章配图与回合一致")
 
 # --- 配置 OpenRouter 客户端 ---
 # 代理可选：仅在 .env 中设置 OPENROUTER_PROXY 或 HTTP_PROXY 时使用（如国内需走代理）；不设置则直连。
@@ -479,21 +295,77 @@ def get_async_openai_client():
     return AsyncOpenAI(api_key=OPENAI_API_KEY, base_url="https://openrouter.ai/api/v1", http_client=http_client)
 
 
+def get_dalle3_client() -> AsyncOpenAI:
+    """返回直连 OpenAI api.openai.com 的客户端（用于 DALL-E 3 出图）。"""
+    key = OPENAI_DIRECT_API_KEY
+    if not key:
+        raise RuntimeError(
+            "OPENAI_DIRECT_API_KEY not set; cannot use DALL-E 3. "
+            "Please add OPENAI_DIRECT_API_KEY=sk-xxx to backend/.env."
+        )
+    proxy_url = (
+        _clean_env_value(os.getenv("OPENROUTER_PROXY"))
+        or _clean_env_value(os.getenv("HTTPS_PROXY"))
+        or _clean_env_value(os.getenv("HTTP_PROXY"))
+    )
+    http_client = (
+        httpx.AsyncClient(proxy=proxy_url, timeout=90.0)
+        if proxy_url
+        else httpx.AsyncClient(timeout=90.0)
+    )
+    return AsyncOpenAI(api_key=key, http_client=http_client)
+
+
+async def _dalle3_generate_image(
+    prompt: str,
+    is_adult: bool = False,
+) -> tuple[str | None, bool]:
+    """
+    使用 DALL-E 3 生成 1024×1024（1:1）图片。
+    返回 (image_url, nsfw_blocked)。
+    prompt 会自动截断至 3900 字符（API 限制 ~4000）。
+    """
+    client = get_dalle3_client()
+    safe_prompt = prompt[:3900]
+    # DALL-E 3 不接受显式负面词；安全限制由模型内置处理
+    try:
+        response = await client.images.generate(
+            model="dall-e-3",
+            prompt=safe_prompt,
+            size="1024x1024",
+            quality="standard",
+            n=1,
+        )
+        url = response.data[0].url
+        print(f"DALL-E 3: generated {url[:80]}...")
+        return url, False
+    except Exception as e:
+        msg = str(e)
+        print(f"DALL-E 3 ERROR: {msg}")
+        if (
+            "content_policy_violation" in msg
+            or "safety system" in msg.lower()
+            or "violates" in msg.lower()
+        ):
+            return None, True  # NSFW 拦截
+        return None, False  # 其他错误，允许回退 SDXL
+
+
 def _openrouter_model_chain(primary: str) -> list[str]:
-    """主模型 + CHAT_MODEL_FALLBACK（逗号分隔）+ OpenAI / Google 备用。"""
+    """主模型 + CHAT_MODEL_FALLBACK（逗号分隔）+ Google / OpenAI 备用（403 地区限制时依次尝试）。"""
     chain: list[str] = [primary]
     fb = os.getenv("CHAT_MODEL_FALLBACK", "") or ""
     for part in fb.split(","):
         p = _clean_env_value(part.strip())
         if p and p not in chain:
             chain.append(p)
-    # 默认优先 OpenAI 族，最后再回退 Gemini
+    # 先尝试其它 Gemini，再试 OpenAI（部分地区对 OpenAI 路由更严）
     for m in (
+        "google/gemini-2.0-flash-001",
         "openai/gpt-4o",
         "openai/gpt-4o-mini",
         "openai/gpt-5.2",
         "openai/gpt-5",
-        "google/gemini-2.0-flash-001",
     ):
         if m not in chain:
             chain.append(m)
@@ -541,21 +413,8 @@ async def _openrouter_chat(client: AsyncOpenAI, **kwargs):
 IMAGE_MODEL_PHOTOMAKER = "tencentarc/photomaker:ddfc2b08d209f9fa8c1eca692712918bd449f695dabb4a958da31802a9570fe4"
 
 
-def _replicate_safe_avatar_url(url: str) -> str:
-    """Replicate 无法拉取 http://localhost/… 参考图；改为 PUBLIC_BASE_URL 下同路径（须已挂载 /split_faces）。"""
-    u = (url or "").strip()
-    if not u.startswith("http"):
-        return u
-    try:
-        from urllib.parse import urlparse
-
-        p = urlparse(u)
-        if p.hostname not in ("localhost", "127.0.0.1"):
-            return u
-        base = (os.getenv("PUBLIC_BASE_URL") or "https://backend-black-snow-4374.fly.dev").rstrip("/")
-        return f"{base}{p.path}" + (f"?{p.query}" if p.query else "")
-    except Exception:
-        return u
+class ImageRateLimitError(RuntimeError):
+    """Raised when image generation provider is rate-limited (HTTP 429)."""
 
 
 async def _sdxl_generate_image(
@@ -567,78 +426,18 @@ async def _sdxl_generate_image(
     is_adult: bool = False,
     composition: str = "duo",
     dinner_scene: bool = False,
-    portrait_style: str = "cinematic",
-    ref_image_line: str = "",
-    ref_male_character: str = "",
-    ref_female_name: str = "",
 ):
     """
     返回 (image_url, nsfw_blocked: bool)
-    出图仅使用 Replicate：PhotoMaker（单人锁脸）与 SDXL 文生图；本项目未使用 DALL·E 3。
-    SDXL 输出强制 width=height=1024（原生 1:1 方图）。
-    ref_image_line：方图开场句 + ref image（含男女名）。
-    ref_male_character / ref_female_name：用于定位 split_faces 下男主 PNG；双人电影场景跳过 PhotoMaker，走 SDXL。
+    dinner_scene=True：句子里有晚餐 —— PhotoMaker 必须带餐桌饭菜中景，禁止纯大头贴。
     """
-    _ps = (portrait_style or "cinematic").strip().lower()
-    is_comic = _ps == "comic"
-    solo = composition.strip().lower() == "solo"
-    color_pre = COLOR_COMIC_PREFIX if is_comic else COLOR_CINEMA_PREFIX
-    core = (prompt or "").strip()
-    core = core.rstrip().rstrip(".").strip()
-    suffix = CINEMA_QUALITY_SUFFIX
-    ref_line = (ref_image_line or "").strip()
-
-    # 双人 + 电影质感：仅从入参解析【男主 + 女主】两名（禁止额外角色）；core = 上游剧情/场景正文
-    negative_prompt = ""
-    if not is_comic and not solo:
-        # 入参即「payload」语义：仅信任 ref_male_character / ref_female_name + 内置外貌库（与前端选人一致）
-        male_key = (ref_male_character or "").strip() or "Adrien"
-        female_key = (ref_female_name or "").strip() or "Night Elegance"
-        male_feat = CHARACTER_PROFILES.get(male_key, CHARACTER_PROFILES["Adrien"])
-        _female_looks = {
-            "Fresh Chic": "young woman, cute short bob hair, cozy oversized sweater, soft smooth skin, warm approachable look",
-            "Night Elegance": "young woman, long straight black hair, elegant silk evening gown, refined sharp features, almond eyes",
-            "Executive Aura": "woman, sharp confident eyes, tailored black blazer, confident office elegance",
-            "Grace Classic": "woman, auburn hair in elegant updo, classic chic vintage dress, timeless grace",
-        }
-        female_feat = _female_looks.get(female_key, _female_looks["Night Elegance"])
-        translated_text = core
-        image_prompt = (
-            f"A masterpiece square portrait composition, 1:1 aspect ratio, centered dramatic scene. "
-            f"STRICTLY TWO PEOPLE ONLY — one adult man and one adult woman in the SAME square frame, both centered and perfectly contained: "
-            f"1. [{male_key}, male — {male_feat}] "
-            f"2. [{female_key}, female — {female_feat}]. "
-            f"MANDATORY FRAMING: medium-wide establishing view within the square (NOT extreme face close-up), BOTH man and woman clearly visible with environment matching the story; "
-            f"if outdoor/park is implied, show trees, path, sky — NOT a studio headshot crop. "
-            f"Action: {translated_text}. "
-            f"Style: photorealistic, 8k, dramatic chiaroscuro lighting; natively fill the entire square canvas edge-to-edge, not a cropped landscape."
-        )
-        negative_prompt = (
-            "3 people, three faces, extra characters, crowd, background characters, anime, cartoon, duplicate characters, two males, deformed, "
-            "solo portrait, watermark, text, white borders, vertical diptych, stacked portraits, split layout, "
-            "only one woman, solo female, single person, only one face, missing man, no man, male cropped out, "
-            "extreme close-up eyes only, beauty macro crop, empty black area, letterboxing, unused canvas"
-        )
-        prompt = image_prompt
-        merged_negative_parts = [negative_prompt]
-        if not is_adult:
-            merged_negative_parts.append(NEGATIVE_PROMPT_TEEN_EXTRA)
-        if extra_negative:
-            merged_negative_parts.append(extra_negative)
-        merged_negative = ", ".join(merged_negative_parts)
-    else:
-        if ref_line:
-            assembled = f"{ref_line} {color_pre} {core}. {suffix}".strip()
-        else:
-            assembled = f"{color_pre} {core}. {suffix}".strip() if core else f"{color_pre} {suffix}".strip()
-        prompt = assembled
-
-        merged_negative_parts = [NEGATIVE_PROMPT_COMIC if is_comic else NEGATIVE_PROMPT_BASE]
-        if not is_adult:
-            merged_negative_parts.append(NEGATIVE_PROMPT_TEEN_EXTRA)
-        if extra_negative:
-            merged_negative_parts.append(extra_negative)
-        merged_negative = ", ".join(merged_negative_parts)
+    # 基础负面 + 按年龄追加的负面 + 本轮额外负面
+    merged_negative_parts = [NEGATIVE_PROMPT_BASE]
+    if not is_adult:
+        merged_negative_parts.append(NEGATIVE_PROMPT_TEEN_EXTRA)
+    if extra_negative:
+        merged_negative_parts.append(extra_negative)
+    merged_negative = ", ".join(merged_negative_parts)
 
     def _is_nsfw(msg: str) -> bool:
         return ("NSFW" in msg) or ("nsfw" in msg)
@@ -647,14 +446,9 @@ async def _sdxl_generate_image(
         m = msg.lower()
         return ("429" in m) or ("throttled" in m) or ("rate limit" in m)
 
+    solo = composition.strip().lower() == "solo"
+
     def _photomaker_negative() -> str:
-        if negative_prompt:
-            parts = [negative_prompt]
-            if not is_adult:
-                parts.append(NEGATIVE_PROMPT_TEEN_EXTRA)
-            if extra_negative:
-                parts.append(extra_negative)
-            return ", ".join(parts)
         parts = [REPLICATE_NEGATIVE_ULTIMATE]
         if solo:
             parts.append(REPLICATE_NEGATIVE_SOLO_SUBJECT)
@@ -662,31 +456,11 @@ async def _sdxl_generate_image(
             parts.append(extra_negative)
         return ", ".join(parts)
 
-    _pm_style = "Digital Art" if is_comic else "Cinematic"
+    rate_limited_hit = False
 
-    # --- 参考图：split_faces 本地 PNG → 拼接或单张 → PhotoMaker ---
-    photomaker_input: Any = None
-    photomaker_input_desc = ""
-    male_name = (ref_male_character or "").strip()
-    female_name = (ref_female_name or "").strip() or "Night Elegance"
-    if male_name:
-        mp, _fp = _split_face_local_paths(male_name, female_name, portrait_style)
-        # 禁止左右拼接双脸：PhotoMaker 会照抄成「左右两张脸 + 右侧黑边」，与「单场景电影画面」冲突。
-        if os.path.isfile(mp):
-            photomaker_input = mp
-            photomaker_input_desc = f"{'solo' if solo else 'duo'}_male_local:{mp}"
-    if photomaker_input is None and (male_img or "").strip().startswith("http"):
-        photomaker_input = _replicate_safe_avatar_url(male_img.strip())
-        photomaker_input_desc = f"url:{str(photomaker_input)[:80]}..."
-
-    # PhotoMaker 为单人脸身份模型，双人场景极易变成「单人脸特写 / 性别错乱」；双人电影质感一律走 SDXL 文生图保构图。
-    if (not solo) and (not is_comic):
-        if photomaker_input is not None:
-            print("👉 duo cinematic: skip PhotoMaker, use SDXL two-shot (avoid single-face collapse)")
-        photomaker_input = None
-
-    if photomaker_input is not None:
-        print(f"PhotoMaker input ({photomaker_input_desc}) composition={composition} style={_pm_style}")
+    # PhotoMaker（单参考图锁脸）：优先使用 male_img（前端传的男主参考图）
+    if male_img:
+        print(f"Attempting generation with PhotoMaker input_image: {male_img} composition={composition}")
         base_prompt = prompt if ("img" in prompt.lower()) else f"{prompt} img"
         if solo:
             pm_prompt = (
@@ -695,70 +469,45 @@ async def _sdxl_generate_image(
                 f"{base_prompt}"
             )
         else:
-            dual_hint = (
-                "The input_image is ONLY a facial-identity reference for the MALE lead — embed him naturally in the scene. "
-                "You MUST also render exactly ONE woman (female) in the same frame — one man + one woman, never two women. "
-                "The woman must match the female protagonist described in the prompt text. "
-                "Generate ONE single continuous photorealistic wide frame — NOT vertical stack, NOT two stacked headshots, NOT a diptych, NOT split-screen. "
-                "Full-bleed, edge-to-edge, no black bars. "
-            )
             if dinner_scene:
                 pm_prompt = (
-                    dual_hint
-                    + TWO_SHOT_CAMERA_DIRECTIVE
-                    + "RESTAURANT DINNER SCENE — medium-wide or wide shot: upscale restaurant interior, warm candlelight. "
-                    "A dining table with VISIBLE plates, food, wine or water glasses and cutlery occupies the lower/center frame (mandatory). "
-                    "One man and one woman seated at this SAME table, engaged in conversation during dinner. "
-                    "FORBIDDEN: extreme close-up on eyes only, forehead-only crop, face-only crop with no table, empty background with no meal props. "
-                    "No third person. "
-                    + base_prompt
+                    f"{TWO_SHOT_CAMERA_DIRECTIVE}"
+                    "RESTAURANT DINNER SCENE — medium-wide shot: a dining table with VISIBLE plates, food, wine or water glasses "
+                    "and cutlery MUST appear clearly in the lower half or center of the frame (not optional). "
+                    "One man and one woman (1boy 1girl) seated across or beside this table, talking during dinner. "
+                    "Both faces visible but framing MUST include the meal setting — FORBIDDEN: forehead-only crop, eye extreme close-up, "
+                    "portrait with zero table or empty frame without dishes. No third person. "
+                    f"{base_prompt}"
                 )
             else:
                 pm_prompt = (
-                    dual_hint
-                    + TWO_SHOT_CAMERA_DIRECTIVE
-                    + "Strictly only two people: exactly 1boy and exactly 1girl. One man (male lead) and one woman (protagonist). "
-                    "Not two women, not two men. Not three people. Environmental two-shot: show setting and spatial context, not twin headshot panels. "
-                    "Hands natural; avoid giant face crops that erase the background. "
-                    + base_prompt
+                    f"{TWO_SHOT_CAMERA_DIRECTIVE}"
+                    "Strictly only two people: exactly 1boy and exactly 1girl. One man (male lead) and one woman (protagonist). "
+                    "Not two women, not two men. Not three people. Both faces clearly visible, no third face. "
+                    "Hands relaxed at sides or naturally placed; focus on faces; avoid prominent hand gestures in center. "
+                    f"{base_prompt}"
                 )
-
-        def _input_image_for_replicate() -> Any:
-            if isinstance(photomaker_input, str) and photomaker_input.startswith("http"):
-                return photomaker_input
-            if isinstance(photomaker_input, str) and os.path.isfile(photomaker_input):
-                with open(photomaker_input, "rb") as f:
-                    return io.BytesIO(f.read())
-            return photomaker_input
-
-        backoffs = [0, 3, 6, 12, 20]
+        input_data = {
+            "prompt": pm_prompt,
+            "negative_prompt": _photomaker_negative(),
+            "input_image": male_img,
+            "num_steps": 30,
+            "style_name": "Cinematic",
+        }
+        backoffs = [0, 1]
         last_err = None
         for wait_s in backoffs:
             if wait_s > 0:
                 await asyncio.sleep(wait_s)
             try:
-                img_payload = _input_image_for_replicate()
-                input_data = {
-                    "prompt": pm_prompt,
-                    "negative_prompt": _photomaker_negative(),
-                    "input_image": img_payload,
-                    "num_steps": 30,
-                    "style_name": _pm_style,
-                }
                 output = await asyncio.wait_for(
                     replicate.async_run(IMAGE_MODEL_PHOTOMAKER, input=input_data),
                     timeout=60.0,
                 )
+                # PhotoMaker 可能返回单个 URL 或 URL 列表
                 if isinstance(output, (list, tuple)) and output:
-                    out_url = str(output[0])
-                else:
-                    out_url = str(output)
-                if _is_photomaker_disposable_temp(photomaker_input):
-                    try:
-                        os.remove(photomaker_input)
-                    except OSError:
-                        pass
-                return out_url, False
+                    return str(output[0]), False
+                return str(output), False
             except asyncio.TimeoutError:
                 last_err = RuntimeError("Replicate PhotoMaker generation timed out after 60 seconds")
                 print("REPLICATE ERROR (PhotoMaker): Timeout - no response after 60 seconds")
@@ -768,34 +517,25 @@ async def _sdxl_generate_image(
                 last_err = e
                 print(f"REPLICATE ERROR (PhotoMaker): {msg}")
                 print(f"   model={IMAGE_MODEL_PHOTOMAKER}")
+                print(f"   input_image url={male_img[:80]}..." if len(male_img) > 80 else f"   input_image url={male_img}")
                 print(f"   traceback:\n{traceback.format_exc()}")
                 if _is_nsfw(msg):
-                    if _is_photomaker_disposable_temp(photomaker_input):
-                        try:
-                            os.remove(photomaker_input)
-                        except OSError:
-                            pass
                     return None, True
                 if _is_rate_limited(msg):
-                    continue
+                    rate_limited_hit = True
+                    break
                 break
         if last_err:
             print(f"Falling back to primary SDXL (PhotoMaker failed): {last_err}")
-        if _is_photomaker_disposable_temp(photomaker_input):
-            try:
-                os.remove(photomaker_input)
-            except OSError:
-                pass
 
-    # SDXL（Replicate stability-ai/sdxl）：强制 1024×1024 原生方图，与 prompt 中 1:1 描述一致（无 DALL·E 分支）
-    _w, _h = 1024, 1024
+    # 原始 SDXL 路径（1:1 方图，与心动海报/分享图保持一致）
     primary_input = {
         "prompt": prompt,
         "negative_prompt": merged_negative,
-        "width": _w,
-        "height": _h,
+        "width": 1024,
+        "height": 1024,
     }
-    backoffs = [0, 2, 4, 8, 15]
+    backoffs = [0, 1]
     last_err = None
     for wait_s in backoffs:
         if wait_s > 0:
@@ -822,10 +562,58 @@ async def _sdxl_generate_image(
             if _is_nsfw(msg):
                 return None, True
             if _is_rate_limited(msg):
+                rate_limited_hit = True
                 continue
             break
 
+    if rate_limited_hit:
+        raise ImageRateLimitError("replicate_429_rate_limited")
     raise last_err if last_err else RuntimeError("Image generation failed without details")
+
+
+async def _generate_scene_image(
+    prompt: str,
+    seed: int | None = None,
+    extra_negative: str | None = None,
+    male_img: str = "",
+    female_img: str = "",
+    is_adult: bool = False,
+    composition: str = "duo",
+    dinner_scene: bool = False,
+) -> tuple[str | None, bool]:
+    """
+    统一场景图出图入口：
+    - IMAGE_BACKEND=dalle3 且 OPENAI_DIRECT_API_KEY 已配置 → 优先 DALL-E 3（1024×1024），失败回退 SDXL
+    - IMAGE_BACKEND=sdxl（默认） → 优先 SDXL；若 SDXL 429 且已配置 OPENAI_DIRECT_API_KEY，则自动切 DALL-E 3
+    """
+    if IMAGE_BACKEND == "dalle3" and OPENAI_DIRECT_API_KEY:
+        url, nsfw = await _dalle3_generate_image(prompt, is_adult=is_adult)
+        if nsfw:
+            return None, True
+        if url:
+            return url, False
+        print("DALL-E 3 returned no URL → falling back to SDXL")
+
+    try:
+        return await _sdxl_generate_image(
+            prompt,
+            seed=seed,
+            extra_negative=extra_negative,
+            male_img=male_img,
+            female_img=female_img,
+            is_adult=is_adult,
+            composition=composition,
+            dinner_scene=dinner_scene,
+        )
+    except ImageRateLimitError:
+        if OPENAI_DIRECT_API_KEY:
+            print("SDXL rate-limited (429) → auto fallback to DALL-E 3")
+            d3_url, d3_nsfw = await _dalle3_generate_image(prompt, is_adult=is_adult)
+            if d3_nsfw:
+                return None, True
+            if d3_url:
+                return d3_url, False
+        raise
 
 
 def _build_storyline(scene: str, character: str, story_mode: str):
@@ -1149,9 +937,6 @@ def _compose_prompt_from_structured(
         f'STRICT SEMANTIC LOCK: This image MUST depict exactly this moment (literal scene, no deviation): "{request.sentence}". '
         "The scene, setting, and character emotions must match the sentence meaning. "
         f"{emotion_rule}"
-        "MAIN SUBJECT MUST BE HUMANS: at least two clearly visible human faces and bodies; "
-        "FORBIDDEN as main subject: coffee table books, open magazines, catalogs, brochures, product still life, "
-        "furniture catalog photos, empty rooms with no people, objects-only composition. "
     )
 
     return (
@@ -1163,8 +948,8 @@ def _compose_prompt_from_structured(
         f"{style_prefix}. "
         f"A cinematic wide two-shot. Exactly two distinct people interacting in the same frame: one woman and one man. "
         f"Hands relaxed at sides or naturally placed; natural arm proportions; focus on faces and upper body; avoid prominent hand gestures in center of frame. "
-        f"LEFT SIDE: the man {request.character} ({male_appearance}, {male_identity_lock}). "
-        f"RIGHT SIDE: the woman — protagonist ({request.protagonist_profile}, {protagonist_identity_lock}). "
+        f"LEFT SIDE: a man ({male_appearance}, {male_identity_lock}). "
+        f"RIGHT SIDE: a woman ({request.protagonist_profile}, {protagonist_identity_lock}). "
         f"The woman must look exactly like the described protagonist; do not generate a generic different face. "
         f"Age lock: all main characters must look like adults between 20 and 39 years old; no middle-aged/elderly appearance. "
         f"Action: {core_action}. "
@@ -1317,57 +1102,33 @@ async def process_turn(request: ProcessTurnRequest):
         if missing_words:
             check_result = {
                 "is_correct": False,
-                "failure_kind": "missing_required_words",
-                "feedback": (
-                    f"本轮必须出现全部「命运词」才算通过。你还缺少: {', '.join(missing_words)}。"
-                    f"完整要求: {', '.join(request.required_words)}。"
-                    "请把这些词自然地写进句子里再提交（这不是语法错误，也不会显示「修正句」）。"
-                ),
-                # 故意不传「修正句」：缺词时无语法修正，避免前端误显示「仅语法最小修正」却和原句一模一样
-                "corrected_sentence": None,
+                "feedback": f"Oops! 你忘记使用这些单词啦: {', '.join(missing_words)}。本轮要求: {', '.join(request.required_words)}。",
+                "corrected_sentence": request.sentence,
             }
             return {"status": "failed", "check_result": check_result, "image_url": None, "text_models_used": []}
 
         check_result = {
             "is_correct": True,
-            "failure_kind": None,
             "feedback": "Sentence accepted.",
             "corrected_sentence": request.sentence,
         }
         check_prompt = f"""
-You are validating English for a game. The user has already used all required words (checked separately). Your job is STRICT and narrow.
+You are a warm, encouraging mentor for an interactive English learning game. Use an enthusiastic, supportive tone.
 
-User sentence (respect their wording and emotional intent — do NOT "improve" style or paraphrase):
-"{request.sentence}"
-Required words (already satisfied): {request.required_words}
-Scene: {request.scene}
+Sentence: "{request.sentence}"
+Required words: {request.required_words}
+Scene context: {request.scene}
 
-WHAT COUNTS AS "is_correct": false (FAIL) — ONLY objective grammar/syntax errors, for example:
-- Clear subject-verb disagreement ("he go" → must be "goes")
-- Wrong inflection or word form that is incorrect in standard English ("I goed")
-- Broken sentence structure that is not a valid English sentence
-- Wrong article or preposition ONLY when it makes the sentence clearly ungrammatical (not when two prepositions are both acceptable)
-
-WHAT MUST ALWAYS BE "is_correct": true (PASS):
-- The sentence is understandable and grammatically acceptable, even if unusual, poetic, or not how a native speaker would say it
-- Unusual collocations, strong emotion, implied meaning, or "non-textbook" phrasing chosen on purpose
-- Stylistic or pragmatic choices (e.g. who "laughs at" vs "with" — NEVER fail for interpretation or tone)
-- Slightly awkward but still grammatical English
-
-FORBIDDEN:
-- Do NOT fail because you would phrase it differently or find it "unnatural"
-- Do NOT suggest alternative sentences for style, clarity, or "better" English in feedback
-- Do NOT change the user's emotional content or story in "corrected_sentence"
-
-"feedback" field:
-- If PASS: short warm praise in mixed Chinese + English only (e.g. "🌟 Nice! 已通过。"). No alternative wording.
-- If FAIL: explain ONLY the specific grammar rule violated in mixed Chinese + English. No full rewrite in feedback.
-
-"corrected_sentence" field:
-- If PASS: copy the user's sentence EXACTLY as given (character-for-character identical to the input sentence).
-- If FAIL: give the MINIMAL edit that fixes ONLY the grammar error; keep meaning and tone; keep all required words (same word families).
-
-If you are unsure whether it is a grammar error, choose "is_correct": true.
+Rules:
+1) If the sentence uses a required word unnaturally (e.g., "funny" instead of "fun" for an activity), you must STILL mark "is_correct": true so the user can pass.
+2) BILINGUAL FEEDBACK: The "feedback" field MUST be in mixed Chinese and English.
+   - Success example: "🌟 Well done! 你的造句非常地道。"
+   - Failure: Still be warm: "Almost there! 试试这样..." or "太棒了，你差点就对了！Try: ..."
+3) ADVANCED SUGGESTION: In "corrected_sentence", give a natural rewrite that MUST keep ALL original required words.
+   - Do NOT replace them with synonyms. Use invite, dinner, casual exactly (or same word family).
+   - Example: required words [invite, dinner, casual] → "She invited him to a casual dinner."
+   - NEVER drop or substitute required words.
+4) Keep feedback concise, friendly, and always mixed Chinese + English.
 
 Return ONLY valid JSON:
 {{ "is_correct": true/false, "feedback": "...", "corrected_sentence": "..." }}
@@ -1381,17 +1142,12 @@ Return ONLY valid JSON:
                 _model_trace=model_trace,
             )
             check_result = json.loads(resp.choices[0].message.content)
-            # 用户要求：通过时不得「纠正」表达或情感，展示句必须与原句一致
-            if check_result.get("is_correct") is True:
-                check_result["corrected_sentence"] = request.sentence
-            check_result["failure_kind"] = None if check_result.get("is_correct") else "grammar"
         except Exception as grammar_err:
             msg = str(grammar_err)
             if _is_openrouter_credit_issue(msg):
                 print(f"⚠️ grammar check fallback due to OpenRouter credits: {msg}")
                 check_result = {
                     "is_correct": True,
-                    "failure_kind": None,
                     "feedback": "Grammar check is temporarily skipped due to service credit limits. You can continue.",
                     "corrected_sentence": request.sentence,
                 }
@@ -1409,8 +1165,6 @@ Return ONLY valid JSON:
                     check_result["is_correct"] = True
                 original_feedback = check_result.get("feedback", "")
                 check_result["feedback"] = original_feedback
-        if check_result.get("is_correct"):
-            check_result["failure_kind"] = None
 
         if not check_result.get("is_correct"):
             return {
@@ -1421,11 +1175,7 @@ Return ONLY valid JSON:
             }
 
         try:
-            _pstyle = (request.portrait_style or "cinematic").strip().lower()
-            if _pstyle == "comic":
-                style_prefix = COMIC_STYLE_PRESETS.get(request.story_style, COMIC_STYLE_PRESETS["mature_romantic"])
-            else:
-                style_prefix = STYLE_PRESETS.get(request.story_style, STYLE_PRESETS["mature_romantic"])
+            style_prefix = STYLE_PRESETS.get(request.story_style, STYLE_PRESETS["mature_romantic"])
             male_appearance = _character_appearance(request.character)
             male_negative = _character_negative(request.character)
             male_identity_lock = _character_identity_lock(request.character)
@@ -1438,9 +1188,6 @@ Return ONLY valid JSON:
             sentence_lower = request.sentence.lower()
             is_forest_sentence = "forest" in sentence_lower
             is_dinner_sentence = "dinner" in sentence_lower
-            # 「餐厅」与「晚餐」在画面上同为餐桌约会场景；仅写 restaurant 未写 dinner 时也必须锁双人+餐桌
-            is_restaurant_sentence = "restaurant" in sentence_lower or "bistro" in sentence_lower
-            is_dinner_or_restaurant = is_dinner_sentence or is_restaurant_sentence
             is_movie_sentence = ("movie" in sentence_lower) or ("watched" in sentence_lower)
             is_bus_sentence = ("bus" in sentence_lower) or ("got off the bus" in sentence_lower) or ("get off the bus" in sentence_lower)
             is_coffee_sentence = ("coffee" in sentence_lower) or ("cafe" in sentence_lower)
@@ -1467,14 +1214,12 @@ Return ONLY valid JSON:
                 or ("moment" in sentence_lower and "with him" in sentence_lower)
                 or ("shared" in sentence_lower and "moment" in sentence_lower and "him" in sentence_lower)
             )
-            # 晚餐/餐厅 + 见他：语义是「两人约会就餐」，不是三人同桌、不是三角关系构图
-            is_dinner_meet_him = is_dinner_or_restaurant and (
+            # 晚餐 + 见他：语义是「两人约会晚餐」，不是三人同桌、不是三角关系构图
+            is_dinner_meet_him = is_dinner_sentence and (
                 "meet him" in sentence_lower
                 or "met him" in sentence_lower
-                or "met me" in sentence_lower
                 or "to meet him" in sentence_lower
                 or ("exciting" in sentence_lower and " him" in sentence_lower)
-                or ("excited" in sentence_lower and (" him" in sentence_lower or " met me" in sentence_lower or " at " in sentence_lower))
             )
             shot_directive = (
                 "Use a medium romantic two-shot: EXACTLY one man (male date) and one woman (protagonist) in ONE frame. "
@@ -1498,7 +1243,7 @@ Return ONLY valid JSON:
                 if is_forest_sentence
                 else (
                     "Use a medium-wide shot that clearly shows dinner table and food context."
-                    if is_dinner_or_restaurant
+                    if is_dinner_sentence
                     else (
                         "Use a cinematic waist-up two-shot (both characters side by side) with visible movie-screen light in background."
                         if is_movie_sentence
@@ -1685,8 +1430,8 @@ Return ONLY valid JSON:
                         "ambiguous third face",
                     ]
 
-            # 只要句子里有 dinner 或 restaurant：画面必须是「餐厅+餐桌+饭菜」——覆盖 chat→咖啡厅、PhotoMaker 大头贴
-            if is_dinner_or_restaurant and not is_forest_sentence and not is_phone_scene:
+            # 只要句子里有 dinner：画面必须是「餐厅+餐桌+饭菜」——覆盖 chat→咖啡厅、PhotoMaker 大头贴
+            if is_dinner_sentence and not is_forest_sentence and not is_phone_scene:
                 structured["location"] = (
                     "upscale restaurant interior during dinner, white or dark linen table, full place settings, warm ambient lighting"
                 )
@@ -1734,7 +1479,7 @@ Return ONLY valid JSON:
                 shot_directive=shot_directive,
                 structured=structured,
             )
-            if is_dinner_or_restaurant and not is_phone_scene:
+            if is_dinner_sentence and not is_phone_scene:
                 art_prompt = (
                     "PRIMARY REQUIREMENT — DINNER VISIBLE: restaurant scene with dining table, plated food, glasses; "
                     "two people at that table. The meal setting must be obvious, not an abstract face portrait. "
@@ -1746,24 +1491,12 @@ Return ONLY valid JSON:
                     f"{request.protagonist_profile}|{request.sentence}|{','.join(request.required_words)}"
                 )
             ) % 2_000_000_000
-            _female_label = (request.protagonist_name or "").strip() or "Night Elegance"
-            _scene_hint = (
-                f"{structured.get('location') or request.scene or 'a romantic date'}, "
-                f"{structured.get('emotion', '')}, matching the user sentence mood"
-            ).strip().strip(",")
-            ref_image_line = _build_ref_image_line_prompt(
-                request.character,
-                _female_label,
-                _scene_hint,
-            )
             duo_negative = (
                 f"{male_negative}, {NO_TWO_MALES}, {BAD_HANDS}, {BAD_ARMS}, {ANTI_MUTATION_CURSE}, {NO_SOLO_CROP}, "
                 "two women, 2 girls, two females, only women in frame, both women, female duo, no man in frame, male missing, only female characters, "
                 "solo female portrait, solo male portrait, one person only, "
                 "single-subject focus, isolated subject, second character missing, "
                 "second character out of frame, second character only portrait, second character missing portrait, "
-                "open book on table, coffee table book, magazine spread, catalog pages, interior design catalog, "
-                "brochure still life, product photography without models, empty room with no people, objects-only shot, "
                 "third person, extra person, third character, crowd, group of three, three people, multiple people, more than two people, "
                 "triptych, three panel, three panels, three column layout, three faces in a row, three heads side by side, "
                 "three portraits aligned horizontally, character selection screen, casting lineup, audition board, police lineup, "
@@ -1783,14 +1516,13 @@ Return ONLY valid JSON:
                     "only female faces, man cropped out, tiny man in background, nervous frown, worried anxious stare, "
                     "sweating nervous, tense mouth"
                 )
-            # 句子里有 friend 时可能三人同桌，勿禁止「第三人」
-            if is_dinner_meet_him and not is_friend_sentence:
+            if is_dinner_meet_him:
                 duo_negative += (
                     ", three people at restaurant, third guest, dinner party group, trio at table, "
                     "two women facing camera with man, ambiguous polyamory framing, crowded dining room focus on three faces, "
                     "love triangle dinner, third wheel seated"
                 )
-            if is_dinner_or_restaurant and not is_phone_scene:
+            if is_dinner_sentence and not is_phone_scene:
                 duo_negative += (
                     ", tight facial crop only, no dining table visible, forehead extreme close-up, "
                     "portrait lens face fill without meal context, missing food and plates"
@@ -1815,12 +1547,7 @@ Return ONLY valid JSON:
                     "2 people, two people, multiple people, woman in frame, female in frame, crowd, "
                     "second person, duo, couple, 1girl, extra faces, third face"
                 )
-                phone_ref = _build_ref_image_line_prompt(
-                    request.character,
-                    "",
-                    "a cozy interior, phone call moment",
-                )
-                phone_url, phone_nsfw = await _sdxl_generate_image(
+                phone_url, phone_nsfw = await _generate_scene_image(
                     phone_prompt,
                     seed=seed,
                     extra_negative=phone_negative,
@@ -1828,10 +1555,6 @@ Return ONLY valid JSON:
                     female_img="",
                     is_adult=request.is_adult,
                     composition="solo",
-                    portrait_style=request.portrait_style or "cinematic",
-                    ref_image_line=phone_ref,
-                    ref_male_character=request.character,
-                    ref_female_name="",
                 )
                 _tm = _dedupe_models_used(model_trace)
                 if not phone_nsfw and phone_url:
@@ -1910,7 +1633,7 @@ Return ONLY valid JSON:
                 current_prompt = f"{duo_two_only_prefix}{kiss_rain_prefix}{art_prompt} {duo_layout_variants[i % len(duo_layout_variants)]}"
                 current_seed = (seed + i * 7919) % 2_000_000_000
 
-                if (is_forest_sentence or is_dinner_or_restaurant or is_movie_sentence or is_bus_sentence or
+                if (is_forest_sentence or is_dinner_sentence or is_movie_sentence or is_bus_sentence or
                         is_coffee_sentence or is_exciting_sentence or is_chat_sentence or is_friend_sentence or is_enjoy_relax_sentence or
                         is_park_sentence or is_walk_sentence or is_funny_sentence or is_surprise_sentence or is_kiss_sentence or is_rain_sentence
                         or is_sweet_moment_with_him or is_dinner_meet_him):
@@ -1926,7 +1649,7 @@ Return ONLY valid JSON:
                             "DINNER MANDATORY: table with dishes/food/glasses MUST occupy visible frame area; both seated at table; "
                             "FORBIDDEN: image where only faces fill frame and zero dinner props visible; forehead-only shot; "
                             "empty table. Warm restaurant lighting; engaged or happy expressions. "
-                            if is_dinner_or_restaurant
+                            if is_dinner_sentence
                             else ""
                         )
                         + (
@@ -2027,18 +1750,14 @@ Return ONLY valid JSON:
                         "no portrait-only framing; keep both characters visible."
                     )
 
-                candidate_url, candidate_nsfw = await _sdxl_generate_image(
+                candidate_url, candidate_nsfw = await _generate_scene_image(
                     current_prompt,
                     seed=current_seed,
                     extra_negative=duo_negative,
                     male_img=request.male_avatar_url or "",
                     female_img=request.female_avatar_url or "",
                     is_adult=request.is_adult,
-                    dinner_scene=is_dinner_or_restaurant,
-                    portrait_style=request.portrait_style or "cinematic",
-                    ref_image_line=ref_image_line,
-                    ref_male_character=request.character,
-                    ref_female_name=_female_label,
+                    dinner_scene=is_dinner_sentence,
                 )
                 if candidate_nsfw:
                     nsfw_blocked = True
@@ -2061,7 +1780,7 @@ Return ONLY valid JSON:
 
             # 全部失败时再试一次极简 prompt，提高出图率
             if image_url is None and not nsfw_blocked and not last_candidate_url:
-                if is_dinner_or_restaurant:
+                if is_dinner_sentence:
                     simple_prompt = (
                         "Restaurant dinner: one man and one woman seated at a table with visible plates of food, "
                         "wine glasses, cutlery, medium-wide shot showing table and meal clearly, warm candlelight, cinematic."
@@ -2072,18 +1791,14 @@ Return ONLY valid JSON:
                         "both clearly visible in frame, warm atmosphere, safe and non-explicit."
                     )
                 try:
-                    simple_url, simple_nsfw = await _sdxl_generate_image(
+                    simple_url, simple_nsfw = await _generate_scene_image(
                         simple_prompt,
                         seed=(seed + 99999) % 2_000_000_000,
                         extra_negative=duo_negative,
                         male_img=request.male_avatar_url or "",
                         female_img=request.female_avatar_url or "",
                         is_adult=request.is_adult,
-                        dinner_scene=is_dinner_or_restaurant,
-                        portrait_style=request.portrait_style or "cinematic",
-                        ref_image_line=ref_image_line,
-                        ref_male_character=request.character,
-                        ref_female_name=_female_label,
+                        dinner_scene=is_dinner_sentence,
                     )
                     if not simple_nsfw and simple_url:
                         last_candidate_url = simple_url
@@ -2158,9 +1873,7 @@ Return ONLY valid JSON:
                     "check_result": check_result,
                     "image_url": None,
                     "rate_limited": True,
-                    "error": (
-                        "Replicate 生图暂时限流（429）。请等待约 15～60 秒后重试；若仍失败，请稍后再试或检查 Replicate 账户额度。"
-                    ),
+                    "error": "Image generation is temporarily rate-limited. Please retry in a few seconds.",
                     "text_models_used": _tm,
                 }
             # 超时或 Replicate 服务异常：不返回 500，返回 200 + error，方便前端展示
@@ -2194,10 +1907,10 @@ Return ONLY valid JSON:
                 "image_url": None,
                 "llm_region_blocked": True,
                 "error": (
-                    "【OpenRouter 403 地区限制】后端访问文本模型被拒（与浏览器 VPN 无关）。"
-                    "本地：在 backend/.env 设置 OPENROUTER_PROXY=http://127.0.0.1:8001（改为 Clash/V2Ray 的「HTTP 代理」端口），保存并重启后端。"
-                    "线上：Fly 将 primary_region 设为 sin（新加坡）后重新 deploy。"
-                    "若 .env 里自定义了 CHAT_MODEL=openai/…，可改为 google/gemini-2.0-flash-001。"
+                    "Text model is not available in your region (OpenRouter 403). "
+                    "Fix: (1) In backend/.env set OPENROUTER_PROXY to your HTTP proxy (e.g. http://127.0.0.1:7890) and restart; "
+                    "or (2) deploy Fly to a supported region (e.g. sin Singapore) in fly.toml; "
+                    "or (3) set CHAT_MODEL=google/gemini-2.0-flash-001 if you overrode it to a restricted model."
                 ),
                 "text_models_used": _tm,
             }
@@ -2211,7 +1924,7 @@ Return ONLY valid JSON:
                 },
                 "image_url": None,
                 "llm_connection_failed": True,
-                "error": "无法连接 OpenRouter。请确认代理已开，且 OPENROUTER_PROXY 端口正确（本项目示例 http://127.0.0.1:8001），保存 .env 后重启后端。",
+                "error": "无法连接 OpenRouter。请确认代理已开，且 OPENROUTER_PROXY 端口正确（如 Clash HTTP 多为 7890），保存 .env 后重启后端。",
                 "text_models_used": _tm,
             }
         if _is_openrouter_auth_issue(msg):
@@ -2250,24 +1963,10 @@ async def generate_final_story(request: FinalStoryRequest):
     client = get_async_openai_client()
     try:
         sentences_str = "\n".join([f"{i+1}. {s}" for i, s in enumerate(request.sentences)])
-        _fs_ps = (request.portrait_style or "cinematic").strip().lower()
-        if _fs_ps == "comic":
-            style_prefix = COMIC_STYLE_PRESETS.get(request.story_style, COMIC_STYLE_PRESETS["mature_romantic"])
-        else:
-            style_prefix = STYLE_PRESETS.get(request.story_style, STYLE_PRESETS["mature_romantic"])
+        style_prefix = STYLE_PRESETS.get(request.story_style, STYLE_PRESETS["mature_romantic"])
         male_appearance = _character_appearance(request.character)
         male_negative = _character_negative(request.character)
         male_identity_lock = _character_identity_lock(request.character)
-        protagonist_identity_lock_final = (
-            f"protagonist must strictly match this selected look: {request.protagonist_profile}; "
-            "keep consistent facial structure, hairstyle, and vibe; do not switch to another woman."
-        )
-        _female_label_fs = (request.protagonist_name or "").strip() or "Night Elegance"
-        ref_image_line_final = _build_ref_image_line_prompt(
-            request.character,
-            _female_label_fs,
-            f"{request.scene} story finale, cinematic emotional beat",
-        )
         style_instruction = (
             "mature romantic, sophisticated tone" if request.story_style == "mature_romantic"
             else "young cute, sweet, lighthearted tone (NOT childish, still respectful)"
@@ -2358,10 +2057,6 @@ Return ONLY valid JSON:
                 seed=seed,
                 extra_negative=final_extra_negative,
                 is_adult=request.is_adult,
-                portrait_style=request.portrait_style or "cinematic",
-                ref_image_line=ref_image_line_final,
-                ref_male_character=request.character,
-                ref_female_name=_female_label_fs,
             )
             return {"url": url, "nsfw_blocked": nsfw}
 
@@ -2406,10 +2101,6 @@ Return ONLY valid JSON:
                 seed=retry_seed,
                 extra_negative=final_extra_negative,
                 is_adult=request.is_adult,
-                portrait_style=request.portrait_style or "cinematic",
-                ref_image_line=ref_image_line_final,
-                ref_male_character=request.character,
-                ref_female_name=_female_label_fs,
             )
             if retry_url and retry_url != u:
                 image_urls[i] = retry_url
